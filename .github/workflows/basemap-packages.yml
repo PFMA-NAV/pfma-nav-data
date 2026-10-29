@@ -105,17 +105,27 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # The cache service fails now and then: without it, the shared sources are downloaded again below.
       - uses: actions/cache/restore@v5
+        continue-on-error: true
         with:
           path: sources
           key: basemap-sources-${{ github.run_id }}
-          fail-on-cache-miss: true
 
       - name: Build ${{ matrix.area }}
         run: |
           # /mnt has far more free space than the root disk of the runner.
           sudo mkdir -p /mnt/pt && sudo chown "$USER" /mnt/pt
-          mv sources /mnt/pt/sources
+          mkdir -p sources && mv sources /mnt/pt/sources
+          for f in water-polygons-split-3857.zip:https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip \
+                   natural_earth_vector.sqlite.zip:https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip; do
+            name="${f%%:*}"; url="${f#*:}"
+            if [ ! -s "/mnt/pt/sources/$name" ]; then
+              echo "Cache missed: downloading $name"
+              curl -fsSL --retry 6 --retry-delay 30 --retry-all-errors \
+                -A "PFMA-NAV-basemap (github.com/PFMA-NAV/pfma-nav-data)" -o "/mnt/pt/sources/$name" "$url"
+            fi
+          done
           curl -fsSL -o planetiler.jar "https://github.com/onthegomap/planetiler/releases/download/$PLANETILER_VERSION/planetiler.jar"
           echo "$PLANETILER_SHA256  planetiler.jar" | sha256sum -c -
           start=$(date +%s)
