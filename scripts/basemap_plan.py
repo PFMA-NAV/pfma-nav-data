@@ -34,9 +34,10 @@ def main():
         countries = [c.strip().upper() for c in wanted.split(',') if c.strip()]
     with urllib.request.urlopen(GEOFABRIK_INDEX, timeout=60) as r:
         index = json.load(r)
-    by_code = {}
+    by_code, urls = {}, {}
     for feature in index['features']:
         props = feature['properties']
+        urls[props['id']] = props.get('urls', {}).get('pbf')
         for code in props.get('iso3166-1:alpha2') or []:
             by_code.setdefault(code, []).append(props['id'])
     areas, unavailable = {}, []
@@ -45,12 +46,17 @@ def main():
         if area is None:
             found = by_code.get(code, [])
             area = found[0] if len(found) == 1 else None
-        if area is None:
+        if area is None or not urls.get(area):
             unavailable.append(code)
             continue
         areas.setdefault(area, []).append(code)
+    # The exact download URL, not the name: Planetiler stops on names that match twice ("georgia" is
+    # also a US state), and ids with a slash ("us/puerto-rico") become file names without one.
     plan = {
-        'areas': [{'area': a, 'countries': sorted(c)} for a, c in sorted(areas.items())],
+        'areas': [
+            {'area': a.replace('/', '-'), 'geofabrik': a, 'url': urls[a], 'countries': sorted(c)}
+            for a, c in sorted(areas.items())
+        ],
         'unavailable': sorted(unavailable),
     }
     with open('plan.json', 'w', encoding='utf-8') as f:

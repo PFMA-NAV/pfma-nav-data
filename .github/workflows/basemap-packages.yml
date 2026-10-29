@@ -7,7 +7,7 @@
 # A run publishes the release basemap-YYYYMMDD-HHMM (never marked "latest": that is the airspace
 # packages') and, once every extract built, updates basemap-index.json in the fixed release
 # "basemap-index": each country points to the release of its newest extract, so a run for a few
-# countries keeps the rest. A failed extract leaves the previous index in place.
+# countries keeps the rest. A failed extract keeps its previous entry; the run then ends as failed.
 name: Base map packages
 
 on:
@@ -113,7 +113,11 @@ jobs:
           curl -fsSL -o planetiler.jar "https://github.com/onthegomap/planetiler/releases/download/$PLANETILER_VERSION/planetiler.jar"
           echo "$PLANETILER_SHA256  planetiler.jar" | sha256sum -c -
           start=$(date +%s)
-          java -Xmx10g -jar planetiler.jar --area="${{ matrix.area }}" --download \
+          # Geofabrik may refuse bursts of parallel downloads: retry with pauses before giving up.
+          curl -fsSL --retry 6 --retry-delay 30 --retry-all-errors \
+            -A "PFMA-NAV-basemap (github.com/PFMA-NAV/pfma-nav-data)" \
+            -o "/mnt/pt/sources/${{ matrix.area }}.osm.pbf" "${{ matrix.url }}"
+          java -Xmx10g -jar planetiler.jar --osm_path="/mnt/pt/sources/${{ matrix.area }}.osm.pbf" --download \
             --download_dir=/mnt/pt/sources --tmpdir=/mnt/pt/tmp \
             --output="/mnt/pt/${{ matrix.area }}.pmtiles" --maxzoom="$MAXZOOM" --only_layers="$LAYERS"
           file="/mnt/pt/${{ matrix.area }}.pmtiles"
@@ -153,7 +157,10 @@ jobs:
           # Start from the published index so a run for a few countries keeps the others.
           gh release download basemap-index --repo "$GITHUB_REPOSITORY" --pattern basemap-index.json \
             --output previous-index.json 2>/dev/null || echo "No previous index"
-          python3 scripts/basemap_index.py "$tag" results plan.json previous-index.json
+          # Extracts that failed keep their previous entry (or stay unavailable); the rest is published
+          # anyway, and the run still ends as failed so GitHub e-mails about it.
+          failed=0
+          python3 scripts/basemap_index.py "$tag" results plan.json previous-index.json || failed=1
           gh release upload "$tag" basemap-index.json --repo "$GITHUB_REPOSITORY" --clobber
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest=false
           if ! gh release view basemap-index --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -162,4 +169,5 @@ jobs:
               --notes "basemap-index.json points to the current base-map release. © OpenMapTiles © OpenStreetMap contributors."
           fi
           gh release upload basemap-index basemap-index.json --repo "$GITHUB_REPOSITORY" --clobber
-          cat basemap-index.json | head -c 1500
+          head -c 1500 basemap-index.json
+          exit $failed
