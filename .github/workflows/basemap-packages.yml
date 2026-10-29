@@ -1,7 +1,8 @@
 # Base-map vector tiles for the PFMA NAV VFR chart, one PMTiles file per Geofabrik extract.
 #
 # OpenStreetMap data (ODbL) turned into the OpenMapTiles schema (CC-BY 4.0) by Planetiler, keeping only
-# what the chart draws (urban areas, water, rivers, roads, place names, peaks) up to zoom 12. The base
+# what the chart draws (urban areas, water, rivers, roads, place names, peaks, runways and aerodromes)
+# up to zoom 12. The base
 # map changes slowly: it runs every three months, or on demand for some countries.
 #
 # A run publishes the release basemap-YYYYMMDD-HHMM (never marked "latest": that is the airspace
@@ -30,7 +31,7 @@ concurrency:
 env:
   PLANETILER_VERSION: v0.10.2
   PLANETILER_SHA256: f310bd0413e2e4512b27f4046d418664e8e1d3bf31603c2a70e23de06c167e4d
-  LAYERS: landuse,water,waterway,transportation,place,mountain_peak
+  LAYERS: landuse,water,waterway,transportation,place,mountain_peak,aeroway,aerodrome_label
   MAXZOOM: '12'
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

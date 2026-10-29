@@ -10,6 +10,6 @@ Datos © [openAIP](https://www.openaip.net), CC BY-NC 4.0, procesados para PFMA 
 
 ## Mapa base
 
-Releases `basemap-YYYYMMDD-HHMM`, con un archivo PMTiles por extracto de Geofabrik (esquema OpenMapTiles, hasta zoom 12): zonas urbanas, agua, ríos, rutas, nombres de lugares y cerros. El índice vigente es `basemap-index.json`, en la release `basemap-index`. Se regenera cada tres meses (workflow *Base map packages*).
+Releases `basemap-YYYYMMDD-HHMM`, con un archivo PMTiles por extracto de Geofabrik (esquema OpenMapTiles, hasta zoom 12): zonas urbanas, agua, ríos, rutas, nombres de lugares, cerros, pistas y aeródromos. El índice vigente es `basemap-index.json`, en la release `basemap-index`. Se regenera cada tres meses (workflow *Base map packages*).
 
 © [OpenMapTiles](https://openmaptiles.org) © [colaboradores de OpenStreetMap](https://www.openstreetmap.org/copyright). Datos bajo licencia ODbL 1.0; esquema de mosaicos CC-BY 4.0. Generado con [Planetiler](https://github.com/onthegomap/planetiler) a partir de extractos de [Geofabrik](https://download.geofabrik.de).

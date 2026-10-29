@@ -12,7 +12,7 @@ import json
 import os
 import sys
 
-LAYERS = ['landuse', 'water', 'waterway', 'transportation', 'place', 'mountain_peak']
+LAYERS = ['landuse', 'water', 'waterway', 'transportation', 'place', 'mountain_peak', 'aeroway', 'aerodrome_label']
 
 
 def main():
