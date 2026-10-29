@@ -50,12 +50,12 @@ jobs:
           python3 scripts/basemap_plan.py "${{ inputs.countries || 'all' }}"
           echo "tag=basemap-$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: plan
           path: plan.json
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -74,7 +74,7 @@ jobs:
           rm -f sources/monaco*.osm.pbf
           ls -la sources
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v5
         with:
           path: sources
           key: basemap-sources-${{ github.run_id }}
@@ -94,12 +94,12 @@ jobs:
       max-parallel: 10
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v5
         with:
           path: sources
           key: basemap-sources-${{ github.run_id }}
@@ -124,7 +124,7 @@ jobs:
             "${{ matrix.area }}" "$sha" "$bytes" '${{ toJson(matrix.countries) }}' > "results/${{ matrix.area }}.json"
           gh release upload "${{ needs.plan.outputs.tag }}" "$file" --repo "$GITHUB_REPOSITORY" --clobber
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: result-${{ matrix.area }}
           path: results/
@@ -137,11 +137,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: plan
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: result-*
           path: results
