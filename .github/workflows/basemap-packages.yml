@@ -1,0 +1,165 @@
+# Base-map vector tiles for the PFMA NAV VFR chart, one PMTiles file per Geofabrik extract.
+#
+# OpenStreetMap data (ODbL) turned into the OpenMapTiles schema (CC-BY 4.0) by Planetiler, keeping only
+# what the chart draws (urban areas, water, rivers, roads, place names, peaks) up to zoom 12. The base
+# map changes slowly: it runs every three months, or on demand for some countries.
+#
+# A run publishes the release basemap-YYYYMMDD-HHMM (never marked "latest": that is the airspace
+# packages') and, once every extract built, updates basemap-index.json in the fixed release
+# "basemap-index": each country points to the release of its newest extract, so a run for a few
+# countries keeps the rest. A failed extract leaves the previous index in place.
+name: Base map packages
+
+on:
+  schedule:
+    - cron: '0 4 2 1,4,7,10 *'
+  workflow_dispatch:
+    inputs:
+      countries:
+        description: 'Countries (all, or ISO codes such as CL,AR)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: basemap-packages
+  cancel-in-progress: false
+
+env:
+  PLANETILER_VERSION: v0.10.2
+  PLANETILER_SHA256: f310bd0413e2e4512b27f4046d418664e8e1d3bf31603c2a70e23de06c167e4d
+  LAYERS: landuse,water,waterway,transportation,place,mountain_peak
+  MAXZOOM: '12'
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Plan extracts
+        id: plan
+        run: |
+          python3 scripts/basemap_plan.py "${{ inputs.countries || 'all' }}"
+          echo "tag=basemap-$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: plan.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Planetiler
+        run: |
+          curl -fsSL -o planetiler.jar "https://github.com/onthegomap/planetiler/releases/download/$PLANETILER_VERSION/planetiler.jar"
+          echo "$PLANETILER_SHA256  planetiler.jar" | sha256sum -c -
+
+      # Water polygons and Natural Earth (about 1.3 GB) are shared by every extract: download them once
+      # per run (with a tiny extract) and hand them to the build jobs through the cache.
+      - name: Shared sources
+        run: |
+          java -Xmx2g -jar planetiler.jar --area=monaco --download --download_dir=sources \
+            --output=/tmp/monaco.pmtiles --maxzoom=0 --only_layers=water
+          rm -f sources/monaco*.osm.pbf
+          ls -la sources
+
+      - uses: actions/cache/save@v4
+        with:
+          path: sources
+          key: basemap-sources-${{ github.run_id }}
+
+      - name: Release for this run
+        run: |
+          gh release create "${{ steps.plan.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+            --prerelease --latest=false --title "Mapa base ${{ steps.plan.outputs.tag }}" \
+            --notes "Base map vector tiles (OpenMapTiles schema) for PFMA NAV, built with Planetiler from Geofabrik extracts. © OpenMapTiles © OpenStreetMap contributors. Data ODbL 1.0; schema CC-BY 4.0. Not for navigation."
+
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: sources
+          key: basemap-sources-${{ github.run_id }}
+          fail-on-cache-miss: true
+
+      - name: Build ${{ matrix.area }}
+        run: |
+          # /mnt has far more free space than the root disk of the runner.
+          sudo mkdir -p /mnt/pt && sudo chown "$USER" /mnt/pt
+          mv sources /mnt/pt/sources
+          curl -fsSL -o planetiler.jar "https://github.com/onthegomap/planetiler/releases/download/$PLANETILER_VERSION/planetiler.jar"
+          echo "$PLANETILER_SHA256  planetiler.jar" | sha256sum -c -
+          start=$(date +%s)
+          java -Xmx10g -jar planetiler.jar --area="${{ matrix.area }}" --download \
+            --download_dir=/mnt/pt/sources --tmpdir=/mnt/pt/tmp \
+            --output="/mnt/pt/${{ matrix.area }}.pmtiles" --maxzoom="$MAXZOOM" --only_layers="$LAYERS"
+          file="/mnt/pt/${{ matrix.area }}.pmtiles"
+          bytes=$(stat -c %s "$file"); sha=$(sha256sum "$file" | cut -d' ' -f1)
+          echo "${{ matrix.area }}: $(( $(date +%s) - start )) s, $bytes bytes" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p results
+          python3 -c 'import json,sys; print(json.dumps({"area":sys.argv[1],"file":sys.argv[1]+".pmtiles","sha256":sys.argv[2],"bytes":int(sys.argv[3]),"countries":json.loads(sys.argv[4])}))' \
+            "${{ matrix.area }}" "$sha" "$bytes" '${{ toJson(matrix.countries) }}' > "results/${{ matrix.area }}.json"
+          gh release upload "${{ needs.plan.outputs.tag }}" "$file" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.area }}
+          path: results/
+
+  publish:
+    needs: [plan, build]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+
+      - name: Index
+        run: |
+          tag="${{ needs.plan.outputs.tag }}"
+          # Start from the published index so a run for a few countries keeps the others.
+          gh release download basemap-index --repo "$GITHUB_REPOSITORY" --pattern basemap-index.json \
+            --output previous-index.json 2>/dev/null || echo "No previous index"
+          python3 scripts/basemap_index.py "$tag" results plan.json previous-index.json
+          gh release upload "$tag" basemap-index.json --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest=false
+          if ! gh release view basemap-index --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create basemap-index --repo "$GITHUB_REPOSITORY" --latest=false \
+              --title "Índice del mapa base" \
+              --notes "basemap-index.json points to the current base-map release. © OpenMapTiles © OpenStreetMap contributors."
+          fi
+          gh release upload basemap-index basemap-index.json --repo "$GITHUB_REPOSITORY" --clobber
+          cat basemap-index.json | head -c 1500
