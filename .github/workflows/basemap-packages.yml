@@ -67,12 +67,17 @@ jobs:
           echo "$PLANETILER_SHA256  planetiler.jar" | sha256sum -c -
 
       # Water polygons and Natural Earth (about 1.3 GB) are shared by every extract: download them once
-      # per run (with a tiny extract) and hand them to the build jobs through the cache.
+      # per run, under the names Planetiler expects, and hand them to the build jobs through the cache.
+      # Their servers have brief outages: retry for a few minutes before failing the run.
       - name: Shared sources
         run: |
-          java -Xmx2g -jar planetiler.jar --area=monaco --download --download_dir=sources \
-            --output=/tmp/monaco.pmtiles --maxzoom=0 --only_layers=water
-          rm -f sources/monaco*.osm.pbf
+          mkdir -p sources
+          get() {
+            curl -fsSL --retry 6 --retry-delay 30 --retry-all-errors \
+              -A "PFMA-NAV-basemap (github.com/PFMA-NAV/pfma-nav-data)" -o "sources/$2" "$1"
+          }
+          get https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip water-polygons-split-3857.zip
+          get https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip natural_earth_vector.sqlite.zip
           ls -la sources
 
       - uses: actions/cache/save@v5
