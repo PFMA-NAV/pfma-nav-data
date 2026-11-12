@@ -9,6 +9,7 @@
 # packages') and, once every extract built, updates basemap-index.json in the fixed release
 # "basemap-index": each country points to the release of its newest extract, so a run for a few
 # countries keeps the rest. A failed extract keeps its previous entry; the run then ends as failed.
+# Releases that neither the new index nor the previous one names are removed at the end.
 name: Base map packages
 
 on:
@@ -186,4 +187,23 @@ jobs:
           fi
           gh release upload basemap-index basemap-index.json --repo "$GITHUB_REPOSITORY" --clobber
           head -c 1500 basemap-index.json
+          # Releases named by neither this index nor the one before it are out of use: remove them (a
+          # full run leaves about 10 GB behind). A GitHub error here only warns; the next run retries.
+          keep=$(python3 scripts/basemap_keep.py basemap-index.json previous-index.json)
+          if [ -z "$keep" ]; then
+            echo "::warning::Could not read the new index; no old release was removed"
+          else
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.tag_name | test("^basemap-[0-9]{8}-[0-9]{4}$")) | "\(.id) \(.tag_name)"' \
+              | while read -r id old; do
+                if [ "$old" = "$tag" ] || echo "$keep" | grep -qxF "$old"; then continue; fi
+                echo "Removing superseded release $old"
+                # A release with many files times out when deleted whole (HTTP 502): empty it first.
+                gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" --jq '.[].id' \
+                  | xargs -r -P 4 -I{} gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/{}" --silent \
+                  || true
+                gh release delete "$old" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes \
+                  || echo "::warning::Could not remove $old; the next run retries"
+              done || echo "::warning::Could not list releases; old ones stay until the next run"
+          fi
           exit $failed
